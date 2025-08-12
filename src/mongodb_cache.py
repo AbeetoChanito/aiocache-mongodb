@@ -1,8 +1,8 @@
-from aiocache.base import BaseCache
-from aiocache.serializers import JsonSerializer
+from aiocache.base import BaseCache # type: ignore
+from aiocache.serializers import JsonSerializer # type: ignore
 from pymongo import AsyncMongoClient
 import datetime
-from typing import Self, Optional, Union
+from typing_extensions import *
 
 class MongoDBCache(BaseCache[str]):
     NAME = "MongoDBCache"
@@ -58,7 +58,7 @@ class MongoDBCache(BaseCache[str]):
             return [item["value"] for item in results]
         return [item["value"].decode(encoding) for item in results] 
 
-    async def _set(self, key, value, ttl: Optional[Union[datetime.timedelta, float]]=None, _cas_token=None, _conn=None) -> None:
+    async def _set(self, key: str, value: str, ttl: Optional[Union[datetime.timedelta, float]]=None, _cas_token=None, _conn=None) -> None:
         expiration_date = await self._get_expiration_date(ttl)
 
         if _cas_token is not None:
@@ -71,6 +71,8 @@ class MongoDBCache(BaseCache[str]):
             upsert=True
         )
 
+    _add = _set
+
     async def _cas(self, key: str, value: str, cas_token: str, ttl: Optional[Union[datetime.timedelta, float]]=None, _conn=None) -> bool:
         expiration_date = await self._get_expiration_date(ttl)
         result = await self.collection.update_one(
@@ -78,6 +80,19 @@ class MongoDBCache(BaseCache[str]):
             {"$set": {"value": value, "expiration_date": expiration_date}}
         )
         return result.modified_count == 1
+    
+    async def _multi_set(self, pairs: list[Tuple[str, str]], ttl=None, _conn=None) -> bool:
+        values: Dict[str, Any] = dict(pairs)
+
+        if ttl is not None:
+            values_ttl: Dict[str, Dict[str, Union[str, datetime.datetime, None]]] = {}
+            for key, value in values.items():
+                values_ttl[key] = {"value": value, "expiration_date": await self._get_expiration_date(ttl)}
+            values = values_ttl
+
+        await self.collection.update_many({}, values)
+
+        return True
 
 
     def __repr__(self) -> str: 
