@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "aiocache-mongodb"
+version = "0.1.0"
+description = "A MongoDB cache backend for aiocache."
+authors = [
+    { name = "Abinav Kumar", email = "abeetochan@gmail.com" }
+]
+license = { file = "LICENSE" }
+dependencies = [
+    "aiocache>=0.11.0",
+    "pymongo>=4.14.0"
+]
+requires-python = ">=3.10"
