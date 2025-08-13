@@ -23,7 +23,8 @@ class MongoDBCache(BaseCache[str]):
         self.db = self.client[database]
         self.collection = self.db[collection_name]
 
-    async def _get_expiration_date(self, ttl: Optional[Union[datetime.timedelta, float]]) -> Optional[datetime.datetime]:
+    @staticmethod
+    async def _get_expiration_date(ttl: Optional[Union[datetime.timedelta, float]]) -> Optional[datetime.datetime]:
         """
         Calculates the expiration date based on a TTL value.
         If ttl is None, returns None.
@@ -43,7 +44,7 @@ class MongoDBCache(BaseCache[str]):
     async def __aexit__(self, *_args, **_kwargs) -> None:
         await self.client.close()
 
-    async def _get(self, key: str, encoding: Optional[str]="utf-8", _conn=None) -> Optional[str]:
+    async def _get(self, key: str, encoding: Optional[str]="utf-8", _conn=None) -> Optional[Any]:
         value = await self.collection.find_one({"key": key}, {"_id": 0, "value": 1})
         if encoding is None or value is None:
             return value
@@ -51,14 +52,14 @@ class MongoDBCache(BaseCache[str]):
     
     _gets = _get
 
-    async def _multi_get(self, keys: list[str], encoding: Optional[str]="utf-8", _conn=None) -> list[str]:
+    async def _multi_get(self, keys: list[str], encoding: Optional[str]="utf-8", _conn=None) -> list[Any]:
         cursor = self.collection.find({"key": {"$in": keys}})
         results = await cursor.to_list(length=None)
         if encoding is None:
             return [item["value"] for item in results]
         return [item["value"].decode(encoding) for item in results] 
 
-    async def _set(self, key: str, value: str, ttl: Optional[Union[datetime.timedelta, float]]=None, _cas_token=None, _conn=None) -> None:
+    async def _set(self, key: str, value: Any, ttl: Optional[Union[datetime.timedelta, float]]=None, _cas_token=None, _conn=None) -> None:
         expiration_date = await self._get_expiration_date(ttl)
 
         if _cas_token is not None:
@@ -73,7 +74,7 @@ class MongoDBCache(BaseCache[str]):
 
     _add = _set
 
-    async def _cas(self, key: str, value: str, cas_token: str, ttl: Optional[Union[datetime.timedelta, float]]=None, _conn=None) -> bool:
+    async def _cas(self, key: str, value: Any, cas_token: str, ttl: Optional[Union[datetime.timedelta, float]]=None, _conn=None) -> bool:
         expiration_date = await self._get_expiration_date(ttl)
         result = await self.collection.update_one(
             {"key": key, "value": cas_token},
@@ -81,11 +82,11 @@ class MongoDBCache(BaseCache[str]):
         )
         return result.modified_count == 1
     
-    async def _multi_set(self, pairs: list[Tuple[str, str]], ttl=None, _conn=None) -> bool:
+    async def _multi_set(self, pairs: list[Tuple[str, Any]], ttl=None, _conn=None) -> bool:
         values: Dict[str, Any] = dict(pairs)
 
         if ttl is not None:
-            values_ttl: Dict[str, Dict[str, Union[str, datetime.datetime, None]]] = {}
+            values_ttl: Dict[str, Dict[Any, Union[str, datetime.datetime, None]]] = {}
             for key, value in values.items():
                 values_ttl[key] = {"value": value, "expiration_date": await self._get_expiration_date(ttl)}
             values = values_ttl
@@ -94,6 +95,14 @@ class MongoDBCache(BaseCache[str]):
 
         return True
 
+    async def _exists(self, key: str, _conn=None) -> bool:
+        result = await self.collection.find_one({"key": key}, {"_id": 1})
+        return result is not None
+
+    async def _increment(self, key: str, delta: int, _conn=None) -> None:
+        result = await self.collection.update_one({"key": key}, {"$inc": {"value": delta}})
+        if result.matched_count == 0:
+            raise TypeError("Value is not an integer") from None
 
     def __repr__(self) -> str: 
         return "MongoDBCache(host={}, port={}, database={}, collection={})".format(
