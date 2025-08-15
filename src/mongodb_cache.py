@@ -1,6 +1,6 @@
 from aiocache.base import BaseCache # type: ignore
 from aiocache.serializers import JsonSerializer # type: ignore
-from pymongo import AsyncMongoClient
+from pymongo import AsyncMongoClient, UpdateOne
 import datetime
 from typing_extensions import *
 
@@ -85,16 +85,23 @@ class MongoDBCache(BaseCache[str]):
         return result.modified_count == 1
     
     async def _multi_set(self, pairs: list[Tuple[str, Any]], ttl=None, _conn=None) -> bool:
-        values: Dict[str, Any] = dict(pairs)
+        expiration_date = self._get_expiration_date(ttl)
+    
+        requests = []
+        for key, value in pairs:
+            update = {"value": value}
+            if expiration_date is not None:
+                update["expiration_date"] = expiration_date
+            
+            requests.append(
+                UpdateOne(
+                    {"key": key},
+                    {"$set": update},
+                    upsert=True
+                )
+            )
 
-        if ttl is not None:
-            expiration_date = self._get_expiration_date(ttl)
-            values_ttl: Dict[str, Dict[Any, Union[str, datetime.datetime, None]]] = {}
-            for key, value in values.items():
-                values_ttl[key] = {"value": value, "expiration_date": expiration_date}
-            values = values_ttl
-
-        result = await self.collection.update_many({}, values)
+        result = await self.collection.bulk_write(requests)
         return result.acknowledged
 
     async def _exists(self, key: str, _conn=None) -> bool:
