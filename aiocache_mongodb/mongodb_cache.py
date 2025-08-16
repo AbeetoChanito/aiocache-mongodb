@@ -2,9 +2,9 @@ from aiocache.base import BaseCache # type: ignore
 from aiocache.serializers import JsonSerializer # type: ignore
 from pymongo import AsyncMongoClient, UpdateOne
 import datetime
-from typing_extensions import *
+from typing import *
 
-class MongoDBCache(BaseCache[str]):
+class MongoDBCache(BaseCache):
     NAME = "MongoDBCache"
 
     def __init__(self,
@@ -37,7 +37,7 @@ class MongoDBCache(BaseCache[str]):
             return None
         return datetime.datetime.now() + datetime.timedelta(seconds=ttl)
 
-    async def __aenter__(self) -> Self:
+    async def __aenter__(self) -> "MongoDBCache":
         await self.collection.create_index({"expiration_date": 1}, expireAfterSeconds=0)
         return self
     
@@ -137,8 +137,6 @@ class MongoDBCache(BaseCache[str]):
     async def _redlock_release(self, key: str, value: Any) -> bool:
         result = await self.collection.find_one_and_delete({"key": key, "value": value})
         return result is not None
-
-
 
     def __repr__(self) -> str: 
         return f"MongoDBCache(host={self.client.HOST}, port={self.client.PORT}, database={self.db.name}, collection={self.collection.name})"
