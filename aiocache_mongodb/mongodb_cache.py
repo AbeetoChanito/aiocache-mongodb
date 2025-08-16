@@ -1,6 +1,6 @@
 from aiocache.base import BaseCache # type: ignore
 from aiocache.serializers import JsonSerializer # type: ignore
-from pymongo import AsyncMongoClient, UpdateOne
+from pymongo import AsyncMongoClient, UpdateOne, ASCENDING
 import datetime
 from typing import *
 
@@ -35,10 +35,10 @@ class MongoDBCache(BaseCache):
 
         if ttl is None:
             return None
-        return datetime.datetime.now() + datetime.timedelta(seconds=ttl)
+        return datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=ttl)
 
     async def __aenter__(self) -> "MongoDBCache":
-        await self.collection.create_index({"expiration_date": 1}, expireAfterSeconds=0)
+        await self.collection.create_index([("expiration_date", ASCENDING)], expireAfterSeconds=0)
         return self
     
     async def __aexit__(self, *_args: Any, **_kwargs: Any) -> None:
@@ -48,9 +48,9 @@ class MongoDBCache(BaseCache):
         value = await self.collection.find_one({"key": key}, {"_id": 0, "value": 1})
         if value is None:
             return None
-        if encoding is None or value is None:
-            return value
-        return value.decode(encoding)
+        if encoding is None:
+            return value["value"]
+        return value["value"].encode(encoding)
     
     _gets = _get
 
@@ -59,7 +59,7 @@ class MongoDBCache(BaseCache):
         results = await cursor.to_list(length=None)
         if encoding is None:
             return [item["value"] for item in results]
-        return [item["value"].decode(encoding) for item in results] 
+        return [item["value"].encode(encoding) for item in results] 
 
     async def _set(self, key: str, value: Any, ttl: Optional[float]=None, _cas_token=None, _conn=None) -> None:
         expiration_date = self._get_expiration_date(ttl)
@@ -109,10 +109,22 @@ class MongoDBCache(BaseCache):
         return result is not None
 
     async def _increment(self, key: str, delta: int, _conn=None) -> None:
-        result = await self.collection.update_one({"key": key}, {"$inc": {"value": delta}})
-        if result.modified_count == 0:
-            raise TypeError("Value is not an integer") from None
-        
+        # NOTE: We have to get and set the value to handle the serializer.
+        value = await self.get(key)
+
+        if value is None:
+            await self.collection.update_one(
+                {"key": key},
+                {"$set": {"value": delta}},
+                upsert=True
+            )
+            return
+            
+        if not isinstance(value, (int, float)):
+            raise TypeError(f"Value is not incrementable") from None
+
+        await self.set(key, value + delta)
+
     async def _expire(self, key: str, ttl: float, _conn=None) -> bool:
         result = None
         if ttl == 0:
