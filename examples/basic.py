@@ -3,9 +3,9 @@ from aiocache_mongodb import MongoDBCache
 
 async def main():
     async with MongoDBCache() as cache:
-        NAME = "Alice"
+        NAME = "name"
 
-        print(f"Setting 'name' to '{NAME}'...")
+        print(f"Setting '{NAME}' to 'Alice'...")
         await cache.set(NAME, "Alice")
 
         exists = await cache.exists(NAME)
